@@ -49,8 +49,14 @@ func resourceAwsS3Bucket() *schema.Resource {
 
 			"acl": {
 				Type:     schema.TypeString,
-				Default:  "private",
 				Optional: true,
+			},
+
+			"acl_policy": {
+				Type:             schema.TypeString,
+				Optional:         true,
+				ValidateFunc:     validateJsonString,
+				DiffSuppressFunc: suppressEquivalentJsonDiffs,
 			},
 
 			"policy": {
@@ -459,6 +465,12 @@ func resourceAwsS3BucketUpdate(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
+	if d.HasChange("acl_policy") {
+		if err := resourceAwsS3BucketAclPolicyUpdate(s3conn, d); err != nil {
+			return err
+		}
+	}
+
 	if d.HasChange("cors_rule") {
 		if err := resourceAwsS3BucketCorsUpdate(s3conn, d); err != nil {
 			return err
@@ -566,6 +578,48 @@ func resourceAwsS3BucketRead(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 
+	// Read the ACL policy
+	pol, err := s3conn.GetBucketAcl(&s3.GetBucketAclInput{
+		Bucket: aws.String(d.Id()),
+	})
+	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %v, type is %T", d.Id(), pol, pol)
+	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %+v, type is %T", d.Id(), pol, pol)
+	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %#v, type is %T", d.Id(), pol, pol)
+
+	b, err := json.Marshal(pol)
+	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %s, type is %T", d.Id(), string(b), pol)
+	if err := d.Set("acl_policy", string(b)); err != nil {
+		return err
+	}
+	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy json: %s", d.Id(), string(b))
+
+	/*
+		if _, ok := d.GetOk("acl_policy"); ok {
+			pol, err := s3conn.GetBucketAcl(&s3.GetBucketAclInput{
+				Bucket: aws.String(d.Id()),
+			})
+			log.Printf("[DEBUG] S3 bucket: %s, read ACL policy2: %v, type is %T", d.Id(), pol, pol)
+			if err != nil {
+				if err := d.Set("acl_policy", ""); err != nil {
+					return err
+				}
+			} else {
+				if v := pol; v == nil {
+					if err := d.Set("acl_policy", ""); err != nil {
+						return err
+					}
+				} else {
+					policy, err := normalizeJsonString(*v)
+					if err != nil {
+						return errwrap.Wrapf("acl_policy contains an invalid JSON: {{err}}", err)
+					}
+					d.Set("acl_policy", policy)
+				}
+
+			}
+		}
+	*/
+
 	// Read the CORS
 	cors, err := s3conn.GetBucketCors(&s3.GetBucketCorsInput{
 		Bucket: aws.String(d.Id()),
@@ -575,7 +629,7 @@ func resourceAwsS3BucketRead(d *schema.ResourceData, meta interface{}) error {
 		if awsErr, ok := err.(awserr.Error); ok && awsErr.Code() != "NoSuchCORSConfiguration" {
 			return err
 		}
-		log.Printf("[WARN] S3 bucket: %s, no CORS configuration could be found.", d.Id())
+		log.Printf("[WARN] S3 bucket: %s, no CORS salam configuration could be found.", d.Id())
 	}
 	log.Printf("[DEBUG] S3 bucket: %s, read CORS: %v", d.Id(), cors)
 	if cors.CORSRules != nil {
@@ -984,6 +1038,87 @@ func resourceAwsS3BucketDelete(d *schema.ResourceData, meta interface{}) error {
 	}
 	return nil
 }
+
+func resourceAwsS3BucketAclPolicyUpdate(s3conn *s3.S3, d *schema.ResourceData) error {
+	bucket := d.Get("bucket").(string)
+	acl := d.Get("acl_policy").(string)
+
+	if acl == "" {
+		log.Printf("[DEBUG] no AccessControlPolicy")
+	}
+
+	var accessControlPolicy *s3.AccessControlPolicy
+	if err := json.Unmarshal([]byte(acl), &accessControlPolicy); err != nil {
+		return err
+	}
+
+	i := &s3.PutBucketAclInput{
+		Bucket:              aws.String(bucket),
+		AccessControlPolicy: accessControlPolicy,
+	}
+	log.Printf("[DEBUG] S3 put bucket ACL: %#v", i)
+
+	_, err := s3conn.PutBucketAcl(i)
+	if err != nil {
+		return fmt.Errorf("Error putting S3 ACL: %s", err)
+	}
+
+	return nil
+}
+
+/*
+func resourceAwsS3BucketAclPolicyUpdate2(s3conn *s3.S3, d *schema.ResourceData) error {
+	bucket := d.Get("bucket").(string)
+	policy := d.Get("acl_policy").(string)
+
+	log.Printf("[DEBUG] S3 bucket: %s, put acl_policy: %s", bucket, policy)
+
+	i := &s3.PutBucketAccelerateConfigurationInput{
+		Bucket: aws.String(bucket),
+		AccelerateConfiguration: &s3.AccelerateConfiguration{
+			Status: aws.String(enableAcceleration),
+		},
+	}
+
+	if policy != "" {
+		log.Printf("[DEBUG] S3 bucket: %s, put acl_policy: %s", bucket, policy)
+		/*
+
+			params := &s3.PutBucketAclInput{
+				Bucket: aws.String(bucket),
+				//AccessControlPolicy: aws.String(policy),
+			}
+					err := resource.Retry(1*time.Minute, func() *resource.RetryError {
+						if _, err := s3conn.PutBucketPolicy(params); err != nil {
+							if awserr, ok := err.(awserr.Error); ok {
+								if awserr.Code() == "MalformedPolicy" {
+									return resource.RetryableError(awserr)
+								}
+							}
+							return resource.NonRetryableError(err)
+						}
+						return nil
+					}		)
+
+				if err != nil {
+					return fmt.Errorf("Error putting S3 policy: %s", err)
+				}
+		* /
+
+	} else {
+		log.Printf("[DEBUG] S3 bucket: %s, delete policy: %s", bucket, policy)
+		_, err := s3conn.DeleteBucketPolicy(&s3.DeleteBucketPolicyInput{
+			Bucket: aws.String(bucket),
+		})
+
+		if err != nil {
+			return fmt.Errorf("Error deleting S3 policy: %s", err)
+		}
+	}
+
+	return nil
+}
+*/
 
 func resourceAwsS3BucketPolicyUpdate(s3conn *s3.S3, d *schema.ResourceData) error {
 	bucket := d.Get("bucket").(string)
