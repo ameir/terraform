@@ -579,20 +579,21 @@ func resourceAwsS3BucketRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	// Read the ACL policy
-	pol, err := s3conn.GetBucketAcl(&s3.GetBucketAclInput{
-		Bucket: aws.String(d.Id()),
-	})
-	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %v, type is %T", d.Id(), pol, pol)
-	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %+v, type is %T", d.Id(), pol, pol)
-	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %#v, type is %T", d.Id(), pol, pol)
+	if _, ok := d.GetOk("acl_policy"); ok {
+		pol, _ := s3conn.GetBucketAcl(&s3.GetBucketAclInput{
+			Bucket: aws.String(d.Id()),
+		})
+		log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %v, type is %T", d.Id(), pol, pol)
+		log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %+v, type is %T", d.Id(), pol, pol)
+		log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %#v, type is %T", d.Id(), pol, pol)
 
-	b, err := json.Marshal(pol)
-	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %s, type is %T", d.Id(), string(b), pol)
-	if err := d.Set("acl_policy", string(b)); err != nil {
-		return err
+		b, _ := json.Marshal(pol)
+		if err := d.Set("acl_policy", string(b)); err != nil {
+			return err
+		}
+		log.Printf("[DEBUG] S3 bucket: %s, read ACL policy: %s, type is %T", d.Id(), string(b), pol)
+		log.Printf("[DEBUG] S3 bucket: %s, read ACL policy json: %s", d.Id(), string(b))
 	}
-	log.Printf("[DEBUG] S3 bucket: %s, read ACL policy json: %s", d.Id(), string(b))
-
 	/*
 		if _, ok := d.GetOk("acl_policy"); ok {
 			pol, err := s3conn.GetBucketAcl(&s3.GetBucketAclInput{
