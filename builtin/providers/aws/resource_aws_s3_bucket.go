@@ -783,8 +783,8 @@ func resourceAwsS3BucketRead(d *schema.ResourceData, meta interface{}) error {
 	}
 
 	log.Printf("[DEBUG] S3 Bucket: %s, logging: %v", d.Id(), logging)
+	lcl := make([]map[string]interface{}, 0, 1)
 	if v := logging.LoggingEnabled; v != nil {
-		lcl := make([]map[string]interface{}, 0, 1)
 		lc := make(map[string]interface{})
 		if *v.TargetBucket != "" {
 			lc["target_bucket"] = *v.TargetBucket
@@ -793,9 +793,9 @@ func resourceAwsS3BucketRead(d *schema.ResourceData, meta interface{}) error {
 			lc["target_prefix"] = *v.TargetPrefix
 		}
 		lcl = append(lcl, lc)
-		if err := d.Set("logging", lcl); err != nil {
-			return err
-		}
+	}
+	if err := d.Set("logging", lcl); err != nil {
+		return err
 	}
 
 	// Read the lifecycle configuration
